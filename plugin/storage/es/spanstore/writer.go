@@ -19,10 +19,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/olivere/elastic"
 	"github.com/pkg/errors"
 	"github.com/uber/jaeger-lib/metrics"
 	"go.uber.org/zap"
-	"github.com/olivere/elastic"
 
 	"github.com/jaegertracing/jaeger/model"
 	"github.com/jaegertracing/jaeger/pkg/cache"
@@ -164,7 +164,7 @@ func (s *SpanWriter) createIndex(indexName string, mapping string, jsonSpan *dbm
 		if !exists {
 			// if there are multiple collectors writing to the same elasticsearch host a race condition can occur - create the index multiple times
 			// we check for the error type to minimize errors
-			_, err := s.client.CreateIndex(indexName).Body(mapping).Do(s.ctx)
+			_, err := s.client.CreateIndex(indexName).Body(mapping).IncludeTypeName(true).Do(s.ctx)
 			s.writerMetrics.indexCreate.Emit(err, time.Since(start))
 			if err != nil {
 				eErr, ok := err.(*elastic.Error)
