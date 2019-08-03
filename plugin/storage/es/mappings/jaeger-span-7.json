@@ -6,7 +6,7 @@
     "index.requests.cache.enable":true
   },
   "mappings":{
-    "_doc":{
+    "span":{
       "dynamic_templates":[
         {
           "span_tags_map":{

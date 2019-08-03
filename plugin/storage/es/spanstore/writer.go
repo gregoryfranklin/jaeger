@@ -32,8 +32,8 @@ import (
 )
 
 const (
-	spanType    = "_doc"
-	serviceType = "_doc"
+	spanType    = "span"
+	serviceType = "service"
 )
 
 type spanWriterMetrics struct {
@@ -164,7 +164,7 @@ func (s *SpanWriter) createIndex(indexName string, mapping string, jsonSpan *dbm
 		if !exists {
 			// if there are multiple collectors writing to the same elasticsearch host a race condition can occur - create the index multiple times
 			// we check for the error type to minimize errors
-			_, err := s.client.CreateIndex(indexName).Body(mapping).IncludeTypeName(true).Do(s.ctx)
+			_, err := s.client.CreateIndex(indexName).Body(mapping).Do(s.ctx)
 			s.writerMetrics.indexCreate.Emit(err, time.Since(start))
 			if err != nil {
 				eErr, ok := err.(*elastic.Error)

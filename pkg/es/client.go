@@ -29,6 +29,7 @@ type Client interface {
 	Search(indices ...string) SearchService
 	MultiSearch() MultiSearchService
 	io.Closer
+	GetVersion() int
 }
 
 // IndicesExistsService is an abstraction for elastic.IndicesExistsService
@@ -39,11 +40,17 @@ type IndicesExistsService interface {
 // IndicesCreateService is an abstraction for elastic.IndicesCreateService
 type IndicesCreateService interface {
 	Body(mapping string) IndicesCreateService
-	Do(ctx context.Context) (*elastic.IndicesCreateResult, error)
-	IncludeTypeName(include bool) IndicesCreateService
+	Do(ctx context.Context) (*IndicesCreateResult, error)
 }
 
-// IndexService is an abstraction for elastic BulkService
+// IndicesCreateResult is an abstraction for elastic.IndicesCreateResult
+type IndicesCreateResult struct {
+	Acknowledged       bool   `json:"acknowledged"`
+	ShardsAcknowledged bool   `json:"shards_acknowledged"`
+	Index              string `json:"index,omitempty"`
+}
+
+// IndexService is an abstraction for elastic.BulkService
 type IndexService interface {
 	Index(index string) IndexService
 	Type(typ string) IndexService

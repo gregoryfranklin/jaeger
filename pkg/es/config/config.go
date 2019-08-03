@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"path/filepath"
@@ -25,15 +26,24 @@ import (
 	"sync"
 	"time"
 
+	elastic6 "github.com/olivere/elastic"
 	"github.com/pkg/errors"
 	"github.com/uber/jaeger-lib/metrics"
 	"go.uber.org/zap"
-	"github.com/olivere/elastic"
+	elastic5 "gopkg.in/olivere/elastic.v5"
 
 	"github.com/jaegertracing/jaeger/pkg/es"
 	"github.com/jaegertracing/jaeger/pkg/es/wrapper"
 	"github.com/jaegertracing/jaeger/storage/spanstore"
 	storageMetrics "github.com/jaegertracing/jaeger/storage/spanstore/metrics"
+)
+
+type ElasticSearchVersion int
+
+const (
+	ES5 ElasticSearchVersion = iota
+	ES6
+	ES7
 )
 
 // Configuration describes the configuration properties needed to connect to an ElasticSearch cluster
@@ -60,6 +70,7 @@ type Configuration struct {
 	Enabled               bool
 	TLS                   TLSConfig
 	UseReadWriteAliases   bool
+	Version               ElasticSearchVersion
 }
 
 // TLSConfig describes the configuration properties to connect tls enabled ElasticSearch cluster
@@ -89,15 +100,31 @@ type ClientBuilder interface {
 
 // NewClient creates a new ElasticSearch client
 func (c *Configuration) NewClient(logger *zap.Logger, metricsFactory metrics.Factory) (es.Client, error) {
+	if c.Version == ES5 {
+		return c.newClient5(logger, metricsFactory)
+	} else if c.Version == ES6 {
+		return c.newClient6(logger, metricsFactory)
+	} else if c.Version == ES7 {
+		return c.newClient7(logger, metricsFactory)
+	} else {
+		return nil, fmt.Errorf("Unsupported elasticsearch version")
+	}
+}
+
+// newClient5 creates a new ElasticSearch client for ES5
+func (c *Configuration) newClient5(logger *zap.Logger, metricsFactory metrics.Factory) (es.Client, error) {
 	if len(c.Servers) < 1 {
 		return nil, errors.New("No servers specified")
 	}
-	options, err := c.getConfigOptions(logger)
-	if err != nil {
-		return nil, err
-	}
+	/*
+		options, err := c.getConfigOptions(logger)
+		if err != nil {
+			return nil, err
+		}
+	*/
 
-	rawClient, err := elastic.NewClient(options...)
+	//	rawClient, err := elastic5.NewClient(options...)
+	rawClient, err := elastic5.NewClient()
 	if err != nil {
 		return nil, err
 	}
@@ -106,10 +133,10 @@ func (c *Configuration) NewClient(logger *zap.Logger, metricsFactory metrics.Fac
 	m := sync.Map{}
 
 	service, err := rawClient.BulkProcessor().
-		Before(func(id int64, requests []elastic.BulkableRequest) {
+		Before(func(id int64, requests []elastic5.BulkableRequest) {
 			m.Store(id, time.Now())
 		}).
-		After(func(id int64, requests []elastic.BulkableRequest, response *elastic.BulkResponse, err error) {
+		After(func(id int64, requests []elastic5.BulkableRequest, response *elastic5.BulkResponse, err error) {
 			start, ok := m.Load(id)
 			if !ok {
 				return
@@ -152,7 +179,143 @@ func (c *Configuration) NewClient(logger *zap.Logger, metricsFactory metrics.Fac
 	if err != nil {
 		return nil, err
 	}
-	return eswrapper.WrapESClient(rawClient, service), nil
+	return eswrapper.WrapESClient5(rawClient, service), nil
+}
+
+// newClient6 creates a new ElasticSearch client for ES6
+func (c *Configuration) newClient6(logger *zap.Logger, metricsFactory metrics.Factory) (es.Client, error) {
+	if len(c.Servers) < 1 {
+		return nil, errors.New("No servers specified")
+	}
+	options, err := c.getConfigOptions(logger)
+	if err != nil {
+		return nil, err
+	}
+
+	rawClient, err := elastic6.NewClient(options...)
+	if err != nil {
+		return nil, err
+	}
+
+	sm := storageMetrics.NewWriteMetrics(metricsFactory, "bulk_index")
+	m := sync.Map{}
+
+	service, err := rawClient.BulkProcessor().
+		Before(func(id int64, requests []elastic6.BulkableRequest) {
+			m.Store(id, time.Now())
+		}).
+		After(func(id int64, requests []elastic6.BulkableRequest, response *elastic6.BulkResponse, err error) {
+			start, ok := m.Load(id)
+			if !ok {
+				return
+			}
+			m.Delete(id)
+
+			// log individual errors, note that err might be false and these errors still present
+			if response != nil && response.Errors {
+				for _, it := range response.Items {
+					for key, val := range it {
+						if val.Error != nil {
+							logger.Error("Elasticsearch part of bulk request failed", zap.String("map-key", key),
+								zap.Reflect("response", val))
+						}
+					}
+				}
+			}
+
+			sm.Emit(err, time.Since(start.(time.Time)))
+			if err != nil {
+				var failed int
+				if response == nil {
+					failed = 0
+				} else {
+					failed = len(response.Failed())
+				}
+				total := len(requests)
+				logger.Error("Elasticsearch could not process bulk request",
+					zap.Int("request_count", total),
+					zap.Int("failed_count", failed),
+					zap.Error(err),
+					zap.Any("response", response))
+			}
+		}).
+		BulkSize(c.BulkSize).
+		Workers(c.BulkWorkers).
+		BulkActions(c.BulkActions).
+		FlushInterval(c.BulkFlushInterval).
+		Do(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	return eswrapper.WrapESClient6(rawClient, service), nil
+}
+
+// newClient7 creates a new ElasticSearch client for ES7
+func (c *Configuration) newClient7(logger *zap.Logger, metricsFactory metrics.Factory) (es.Client, error) {
+	if len(c.Servers) < 1 {
+		return nil, errors.New("No servers specified")
+	}
+	options, err := c.getConfigOptions(logger)
+	if err != nil {
+		return nil, err
+	}
+
+	rawClient, err := elastic6.NewClient(options...)
+	if err != nil {
+		return nil, err
+	}
+
+	sm := storageMetrics.NewWriteMetrics(metricsFactory, "bulk_index")
+	m := sync.Map{}
+
+	service, err := rawClient.BulkProcessor().
+		Before(func(id int64, requests []elastic6.BulkableRequest) {
+			m.Store(id, time.Now())
+		}).
+		After(func(id int64, requests []elastic6.BulkableRequest, response *elastic6.BulkResponse, err error) {
+			start, ok := m.Load(id)
+			if !ok {
+				return
+			}
+			m.Delete(id)
+
+			// log individual errors, note that err might be false and these errors still present
+			if response != nil && response.Errors {
+				for _, it := range response.Items {
+					for key, val := range it {
+						if val.Error != nil {
+							logger.Error("Elasticsearch part of bulk request failed", zap.String("map-key", key),
+								zap.Reflect("response", val))
+						}
+					}
+				}
+			}
+
+			sm.Emit(err, time.Since(start.(time.Time)))
+			if err != nil {
+				var failed int
+				if response == nil {
+					failed = 0
+				} else {
+					failed = len(response.Failed())
+				}
+				total := len(requests)
+				logger.Error("Elasticsearch could not process bulk request",
+					zap.Int("request_count", total),
+					zap.Int("failed_count", failed),
+					zap.Error(err),
+					zap.Any("response", response))
+			}
+		}).
+		BulkSize(c.BulkSize).
+		Workers(c.BulkWorkers).
+		BulkActions(c.BulkActions).
+		FlushInterval(c.BulkFlushInterval).
+		Do(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	return eswrapper.WrapESClient7(rawClient, service), nil
 }
 
 // ApplyDefaults copies settings from source unless its own value is non-zero.
@@ -249,17 +412,17 @@ func (c *Configuration) IsEnabled() bool {
 }
 
 // getConfigOptions wraps the configs to feed to the ElasticSearch client init
-func (c *Configuration) getConfigOptions(logger *zap.Logger) ([]elastic.ClientOptionFunc, error) {
+func (c *Configuration) getConfigOptions(logger *zap.Logger) ([]elastic6.ClientOptionFunc, error) {
 
-	options := []elastic.ClientOptionFunc{elastic.SetURL(c.Servers...), elastic.SetSniff(c.Sniffer),
+	options := []elastic6.ClientOptionFunc{elastic6.SetURL(c.Servers...), elastic6.SetSniff(c.Sniffer),
 		// Disable health check when token from context is allowed, this is because at this time
 		// we don' have a valid token to do the check ad if we don't disable the check the service that
 		// uses this won't start.
-		elastic.SetHealthcheck(!c.AllowTokenFromContext)}
+		elastic6.SetHealthcheck(!c.AllowTokenFromContext)}
 	httpClient := &http.Client{
 		Timeout: c.Timeout,
 	}
-	options = append(options, elastic.SetHttpClient(httpClient))
+	options = append(options, elastic6.SetHttpClient(httpClient))
 	if c.TLS.Enabled {
 		ctlsConfig, err := c.TLS.createTLSConfig()
 		if err != nil {
@@ -299,7 +462,7 @@ func (c *Configuration) getConfigOptions(logger *zap.Logger) ([]elastic.ClientOp
 			}
 		} else {
 			httpClient.Transport = httpTransport
-			options = append(options, elastic.SetBasicAuth(c.Username, c.Password))
+			options = append(options, elastic6.SetBasicAuth(c.Username, c.Password))
 		}
 	}
 	return options, nil

@@ -18,22 +18,16 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
+	elastic6 "github.com/olivere/elastic"
 	"github.com/pkg/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/uber/jaeger-lib/metrics"
-	"go.uber.org/zap"
-	"github.com/olivere/elastic"
 
 	"github.com/jaegertracing/jaeger/model"
-	"github.com/jaegertracing/jaeger/pkg/es/wrapper"
-	"github.com/jaegertracing/jaeger/pkg/testutils"
-	"github.com/jaegertracing/jaeger/plugin/storage/es"
-	"github.com/jaegertracing/jaeger/plugin/storage/es/dependencystore"
-	"github.com/jaegertracing/jaeger/plugin/storage/es/spanstore"
 )
 
 const (
@@ -45,84 +39,8 @@ const (
 	password        = "changeme" // the elasticsearch default password
 	indexPrefix     = "integration-test"
 	tagKeyDeDotChar = "@"
-	maxSpanAge = time.Hour * 72
+	maxSpanAge      = time.Hour * 72
 )
-
-type ESStorageIntegration struct {
-	StorageIntegration
-
-	client        *elastic.Client
-	bulkProcessor *elastic.BulkProcessor
-	logger        *zap.Logger
-}
-
-func (s *ESStorageIntegration) initializeES(allTagsAsFields, archive bool) error {
-	rawClient, err := elastic.NewClient(
-		elastic.SetURL(queryURL),
-		elastic.SetBasicAuth(username, password),
-		elastic.SetSniff(false))
-	if err != nil {
-		return err
-	}
-	s.logger, _ = testutils.NewLogger()
-
-	s.client = rawClient
-
-	s.bulkProcessor, _ = s.client.BulkProcessor().Do(context.Background())
-	client := eswrapper.WrapESClient(s.client, s.bulkProcessor)
-	dependencyStore := dependencystore.NewDependencyStore(client, s.logger, indexPrefix)
-	s.DependencyReader = dependencyStore
-	s.DependencyWriter = dependencyStore
-	s.initSpanstore(allTagsAsFields, archive)
-	s.CleanUp = func() error {
-		return s.esCleanUp(allTagsAsFields, archive)
-	}
-	s.Refresh = s.esRefresh
-	s.esCleanUp(allTagsAsFields, archive)
-	return nil
-}
-
-func (s *ESStorageIntegration) esCleanUp(allTagsAsFields, archive bool) error {
-	_, err := s.client.DeleteIndex("*").Do(context.Background())
-	s.initSpanstore(allTagsAsFields, archive)
-	return err
-}
-
-func (s *ESStorageIntegration) initSpanstore(allTagsAsFields, archive bool) {
-	bp, _ := s.client.BulkProcessor().BulkActions(1).FlushInterval(time.Nanosecond).Do(context.Background())
-	client := eswrapper.WrapESClient(s.client, bp)
-	spanMapping, serviceMapping := es.GetMappings(5, 1)
-	s.SpanWriter = spanstore.NewSpanWriter(
-		spanstore.SpanWriterParams{
-			Client:            client,
-			Logger:            s.logger,
-			MetricsFactory:    metrics.NullFactory,
-			IndexPrefix:       indexPrefix,
-			AllTagsAsFields:   allTagsAsFields,
-			TagDotReplacement: tagKeyDeDotChar,
-			SpanMapping:         spanMapping,
-			ServiceMapping:      serviceMapping,
-			Archive: archive,
-		})
-	s.SpanReader = spanstore.NewSpanReader(spanstore.SpanReaderParams{
-		Client:            client,
-		Logger:            s.logger,
-		MetricsFactory:    metrics.NullFactory,
-		IndexPrefix:       indexPrefix,
-		MaxSpanAge:        maxSpanAge,
-		TagDotReplacement: tagKeyDeDotChar,
-		Archive: archive,
-	})
-}
-
-func (s *ESStorageIntegration) esRefresh() error {
-	err := s.bulkProcessor.Flush()
-	if err != nil {
-		return err
-	}
-	_, err = s.client.Refresh().Do(context.Background())
-	return err
-}
 
 func healthCheck() error {
 	for i := 0; i < 200; i++ {
@@ -134,6 +52,25 @@ func healthCheck() error {
 	return errors.New("elastic search is not ready")
 }
 
+func version() (int, error) {
+	rawClient, err := elastic6.NewClient(
+		elastic6.SetURL(queryURL),
+		elastic6.SetBasicAuth(username, password),
+		elastic6.SetSniff(false))
+	if err != nil {
+		return 0, err
+	}
+	result, _, err := elastic6.NewPingService(rawClient).Do(context.Background())
+	if err != nil {
+		return 0, err
+	}
+	version, err := strconv.Atoi(string(result.Version.Number[0]))
+	if err != nil {
+		return 0, err
+	}
+	return version, nil
+}
+
 func testElasticsearchStorage(t *testing.T, allTagsAsFields, archive bool) {
 	if os.Getenv("STORAGE") != "elasticsearch" {
 		t.Skip("Integration test against ElasticSearch skipped; set STORAGE env var to elasticsearch to run this")
@@ -141,13 +78,41 @@ func testElasticsearchStorage(t *testing.T, allTagsAsFields, archive bool) {
 	if err := healthCheck(); err != nil {
 		t.Fatal(err)
 	}
-	s := &ESStorageIntegration{}
-	require.NoError(t, s.initializeES(allTagsAsFields, archive))
-
-	if archive {
-		t.Run("ArchiveTrace", s.testArchiveTrace)
+	var esVersion int
+	if v, err := version(); err != nil {
+		t.Fatal(err)
 	} else {
-		s.IntegrationTestAll(t)
+		esVersion = v
+	}
+	if esVersion == 5 {
+		s := &ES5StorageIntegration{}
+		require.NoError(t, s.initializeES(allTagsAsFields, archive))
+
+		if archive {
+			t.Run("ArchiveTrace", s.testArchiveTrace)
+		} else {
+			s.IntegrationTestAll(t)
+		}
+	} else if esVersion == 6 {
+		s := &ES6StorageIntegration{}
+		require.NoError(t, s.initializeES(allTagsAsFields, archive))
+
+		if archive {
+			t.Run("ArchiveTrace", s.testArchiveTrace)
+		} else {
+			s.IntegrationTestAll(t)
+		}
+	} else if esVersion == 7 {
+		s := &ES7StorageIntegration{}
+		require.NoError(t, s.initializeES(allTagsAsFields, archive))
+
+		if archive {
+			t.Run("ArchiveTrace", s.testArchiveTrace)
+		} else {
+			s.IntegrationTestAll(t)
+		}
+	} else {
+		t.Fatal("Unsupported ElasticSearch version")
 	}
 }
 
@@ -167,12 +132,12 @@ func (s *StorageIntegration) testArchiveTrace(t *testing.T) {
 	defer s.cleanUp(t)
 	tId := model.NewTraceID(uint64(11), uint64(22))
 	expected := &model.Span{
-		OperationName:    "archive_span",
-		StartTime: time.Now().Add(-maxSpanAge*5),
-		TraceID: tId,
-		SpanID: model.NewSpanID(55),
-		References: []model.SpanRef{},
-		Process: model.NewProcess("archived_service", model.KeyValues{}),
+		OperationName: "archive_span",
+		StartTime:     time.Now().Add(-maxSpanAge * 5),
+		TraceID:       tId,
+		SpanID:        model.NewSpanID(55),
+		References:    []model.SpanRef{},
+		Process:       model.NewProcess("archived_service", model.KeyValues{}),
 	}
 
 	require.NoError(t, s.SpanWriter.WriteSpan(expected))

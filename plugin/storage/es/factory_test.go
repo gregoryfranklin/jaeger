@@ -43,9 +43,15 @@ type mockClientBuilder struct {
 
 func (m *mockClientBuilder) NewClient(logger *zap.Logger, metricsFactory metrics.Factory) (es.Client, error) {
 	if m.err == nil {
-		return &mocks.Client{}, nil
+		mock := new(mocks.Client)
+		mock.On("GetVersion").Return(6)
+		return mock, nil
 	}
 	return nil, m.err
+}
+
+func (m *mockClientBuilder) IsEnabled() bool {
+	return true
 }
 
 func TestElasticsearchFactory(t *testing.T) {
@@ -60,7 +66,7 @@ func TestElasticsearchFactory(t *testing.T) {
 	assert.EqualError(t, f.Initialize(metrics.NullFactory, zap.NewNop()), "failed to create primary Elasticsearch client: made-up error")
 
 	f.primaryConfig = &mockClientBuilder{}
-	f.archiveConfig = &mockClientBuilder{err: errors.New("made-up error2"), Configuration:escfg.Configuration{Enabled:true}}
+	f.archiveConfig = &mockClientBuilder{err: errors.New("made-up error2"), Configuration: escfg.Configuration{Enabled: true}}
 	assert.EqualError(t, f.Initialize(metrics.NullFactory, zap.NewNop()), "failed to create archive Elasticsearch client: made-up error2")
 
 	f.archiveConfig = &mockClientBuilder{}
@@ -126,13 +132,13 @@ func TestLoadTagsFromFile(t *testing.T) {
 }
 
 func TestFactory_LoadMapping(t *testing.T) {
-	spanMapping, serviceMapping := GetMappings(10, 0)
+	spanMapping, serviceMapping := GetMappings(10, 0, 6)
 	tests := []struct {
 		name   string
 		toTest string
 	}{
-		{name: "/jaeger-span.json", toTest: spanMapping},
-		{name: "/jaeger-service.json", toTest: serviceMapping},
+		{name: "/jaeger-span-6.json", toTest: spanMapping},
+		{name: "/jaeger-service-6.json", toTest: serviceMapping},
 	}
 	for _, test := range tests {
 		mapping := loadMapping(test.name)

@@ -24,13 +24,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/olivere/elastic"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/uber/jaeger-lib/metrics"
 	"github.com/uber/jaeger-lib/metrics/metricstest"
 	"go.uber.org/zap"
-	"github.com/olivere/elastic"
 
 	"github.com/jaegertracing/jaeger/model"
 	"github.com/jaegertracing/jaeger/pkg/es/mocks"
@@ -145,30 +145,30 @@ func TestSpanReaderIndices(t *testing.T) {
 	date := time.Now()
 	dateFormat := date.UTC().Format("2006-01-02")
 	testCases := []struct {
-		index string
-		params  SpanReaderParams
+		index  string
+		params SpanReaderParams
 	}{
-		{params:SpanReaderParams{Client:client, Logger: logger, MetricsFactory: metricsFactory,
-			IndexPrefix:"", Archive: false},
-			index: spanIndex+dateFormat},
-		{params:SpanReaderParams{Client:client, Logger: logger, MetricsFactory: metricsFactory,
-			IndexPrefix:"", UseReadWriteAliases: true},
-			index: spanIndex+"read"},
-		{params:SpanReaderParams{Client:client, Logger: logger, MetricsFactory: metricsFactory,
-			IndexPrefix:"foo:", Archive: false},
-			index: "foo:"+indexPrefixSeparator+spanIndex+dateFormat},
-		{params:SpanReaderParams{Client:client, Logger: logger, MetricsFactory: metricsFactory,
-			IndexPrefix:"foo:", UseReadWriteAliases: true},
-			index: "foo:-"+spanIndex+"read"},
-		{params:SpanReaderParams{Client:client, Logger: logger, MetricsFactory: metricsFactory,
-			IndexPrefix:"", Archive: true},
-			index: spanIndex+archiveIndexSuffix},
-		{params:SpanReaderParams{Client:client, Logger: logger, MetricsFactory: metricsFactory,
-			IndexPrefix:"foo:", Archive: true},
-			index: "foo:"+indexPrefixSeparator+spanIndex+archiveIndexSuffix},
-		{params:SpanReaderParams{Client:client, Logger: logger, MetricsFactory: metricsFactory,
-			IndexPrefix:"foo:", Archive: true, UseReadWriteAliases:true},
-			index: "foo:"+indexPrefixSeparator+spanIndex+archiveReadIndexSuffix},
+		{params: SpanReaderParams{Client: client, Logger: logger, MetricsFactory: metricsFactory,
+			IndexPrefix: "", Archive: false},
+			index: spanIndex + dateFormat},
+		{params: SpanReaderParams{Client: client, Logger: logger, MetricsFactory: metricsFactory,
+			IndexPrefix: "", UseReadWriteAliases: true},
+			index: spanIndex + "read"},
+		{params: SpanReaderParams{Client: client, Logger: logger, MetricsFactory: metricsFactory,
+			IndexPrefix: "foo:", Archive: false},
+			index: "foo:" + indexPrefixSeparator + spanIndex + dateFormat},
+		{params: SpanReaderParams{Client: client, Logger: logger, MetricsFactory: metricsFactory,
+			IndexPrefix: "foo:", UseReadWriteAliases: true},
+			index: "foo:-" + spanIndex + "read"},
+		{params: SpanReaderParams{Client: client, Logger: logger, MetricsFactory: metricsFactory,
+			IndexPrefix: "", Archive: true},
+			index: spanIndex + archiveIndexSuffix},
+		{params: SpanReaderParams{Client: client, Logger: logger, MetricsFactory: metricsFactory,
+			IndexPrefix: "foo:", Archive: true},
+			index: "foo:" + indexPrefixSeparator + spanIndex + archiveIndexSuffix},
+		{params: SpanReaderParams{Client: client, Logger: logger, MetricsFactory: metricsFactory,
+			IndexPrefix: "foo:", Archive: true, UseReadWriteAliases: true},
+			index: "foo:" + indexPrefixSeparator + spanIndex + archiveReadIndexSuffix},
 	}
 	for _, testCase := range testCases {
 		r := NewSpanReader(testCase.params)
@@ -750,8 +750,8 @@ func mockSearchService(r *spanReaderTest) *mock.Call {
 	searchService.On("Aggregation", stringMatcher(operationsAggregation), mock.AnythingOfType("*elastic.TermsAggregation")).Return(searchService)
 	searchService.On("Aggregation", stringMatcher(traceIDAggregation), mock.AnythingOfType("*elastic.TermsAggregation")).Return(searchService)
 	r.client.On("Search", mock.AnythingOfType("string"), mock.AnythingOfType("string"), mock.AnythingOfType("string"), mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(searchService)
-	return searchService.On("Do", mock.MatchedBy(func(ctx context.Context) bool{
-		t :=  reflect.TypeOf(ctx).String()
+	return searchService.On("Do", mock.MatchedBy(func(ctx context.Context) bool {
+		t := reflect.TypeOf(ctx).String()
 		return t == "*context.valueCtx" || t == "*context.emptyCtx"
 	}))
 }
