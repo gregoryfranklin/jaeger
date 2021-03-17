@@ -77,7 +77,7 @@ require (
 	gopkg.in/ini.v1 v1.52.0 // indirect
 	gopkg.in/jcmturner/goidentity.v3 v3.0.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0
-	honnef.co/go/tools v0.1.2
+	honnef.co/go/tools v0.1.3
 )
 
 replace github.com/gogo/protobuf => github.com/gogo/protobuf v1.3.2
