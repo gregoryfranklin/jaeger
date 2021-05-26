@@ -15,22 +15,65 @@
 package elasticsearch
 
 import (
+	"path"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
-	jConfig "github.com/jaegertracing/jaeger/pkg/config"
+	"go.opentelemetry.io/collector/component/componenttest"
+	"go.opentelemetry.io/collector/config"
+	"go.opentelemetry.io/collector/config/configtest"
+	"go.opentelemetry.io/collector/exporter/exporterhelper"
+
 	"github.com/jaegertracing/jaeger/plugin/storage/es"
 )
 
-func TestDefaultConfig(t *testing.T) {
-	v, _ := jConfig.Viperize(es.NewOptions("es").AddFlags)
+func TestLoadConfig(t *testing.T) {
+	factories, err := componenttest.NopFactories()
+	assert.NoError(t, err)
+
+	factory := NewFactory()
+	factories.Exporters[typeStr] = factory
+	cfg, err := configtest.LoadConfigFile(t, path.Join(".", "testdata", "config.yaml"), factories)
+
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+
+	e0 := cfg.Exporters[config.NewID(typeStr)]
+	assert.Equal(t, e0, createDefaultConfig())
+
+	e1 := cfg.Exporters[config.NewIDWithName(typeStr, "2")]
 	opts := es.NewOptions("es")
-	opts.InitFromViper(v)
-	defaultCfg := createDefaultConfig().(*Config)
-	assert.Equal(t, []string{"http://127.0.0.1:9200"}, defaultCfg.GetPrimary().Servers)
-	assert.Equal(t, int64(5), defaultCfg.GetPrimary().NumShards)
-	assert.Equal(t, int64(1), defaultCfg.GetPrimary().NumReplicas)
-	assert.Equal(t, "@", defaultCfg.GetPrimary().Tags.DotReplacement)
-	assert.Equal(t, false, defaultCfg.GetPrimary().TLS.Enabled)
+	opts.Primary.Servers = []string{"http://someUrl"}
+	opts.Primary.Username = "user"
+	opts.Primary.Password = "pass"
+	opts.Primary.Sniffer = true
+	opts.Primary.Tags.AllAsFields = true
+	opts.Primary.Tags.DotReplacement = "O"
+	opts.Primary.Tags.File = "/etc/jaeger"
+	opts.Primary.UseReadWriteAliases = true
+	opts.Primary.CreateIndexTemplates = false
+
+	assert.Equal(t,
+		&Config{
+			ExporterSettings: config.NewExporterSettings(config.NewIDWithName(typeStr, "2")),
+			TimeoutSettings: exporterhelper.TimeoutSettings{
+				Timeout: 5 * time.Second,
+			},
+			RetrySettings: exporterhelper.RetrySettings{
+				Enabled:         true,
+				InitialInterval: 5 * time.Second,
+				MaxInterval:     30 * time.Second,
+				MaxElapsedTime:  300 * time.Second,
+			},
+			QueueSettings: exporterhelper.QueueSettings{
+				Enabled:      true,
+				NumConsumers: 10,
+				QueueSize:    5000,
+			},
+			Options: *opts,
+		}, e1,
+	)
 }
