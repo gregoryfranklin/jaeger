@@ -21,16 +21,16 @@ import (
 	"github.com/uber/jaeger-lib/metrics"
 	"go.uber.org/zap"
 
-	"github.com/jaegertracing/jaeger/v2/storage/elasticsearch/esmodeltranslator"
-	"github.com/jaegertracing/jaeger/v2/storage/elasticsearch/esclient"
-	"github.com/jaegertracing/jaeger/v2/storage/elasticsearch/reader/es/esdependencyreader"
-	"github.com/jaegertracing/jaeger/v2/storage/elasticsearch/reader/es/esspanreader"
 	"github.com/jaegertracing/jaeger/model"
 	"github.com/jaegertracing/jaeger/plugin/storage/es"
 	"github.com/jaegertracing/jaeger/plugin/storage/es/spanstore/dbmodel"
 	"github.com/jaegertracing/jaeger/storage"
 	"github.com/jaegertracing/jaeger/storage/dependencystore"
 	"github.com/jaegertracing/jaeger/storage/spanstore"
+	"github.com/jaegertracing/jaeger/v2/storage/elasticsearch/esclient"
+	"github.com/jaegertracing/jaeger/v2/storage/elasticsearch/esmodeltranslator"
+	"github.com/jaegertracing/jaeger/v2/storage/elasticsearch/reader/es/esdependencyreader"
+	"github.com/jaegertracing/jaeger/v2/storage/elasticsearch/reader/es/esspanreader"
 )
 
 const archiveNamespace = "es-archive"
@@ -146,13 +146,13 @@ type singleSpanWriter struct {
 }
 
 type batchSpanWriter interface {
-	writeSpans(context.Context, []esmodeltranslator.ConvertedData) (int, error)
+	writeSpans(context.Context, []esmodeltranslator.ConvertedData) error
 }
 
 var _ spanstore.Writer = (*singleSpanWriter)(nil)
 
 func (s singleSpanWriter) WriteSpan(ctx context.Context, span *model.Span) error {
 	dbSpan := s.converter.FromDomainEmbedProcess(span)
-	_, err := s.writer.writeSpans(ctx, []esmodeltranslator.ConvertedData{{DBSpan: dbSpan}})
+	err := s.writer.writeSpans(ctx, []esmodeltranslator.ConvertedData{{DBSpan: dbSpan}})
 	return err
 }

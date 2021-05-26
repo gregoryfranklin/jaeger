@@ -22,11 +22,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	"github.com/jaegertracing/jaeger/v2/storage/elasticsearch/esmodeltranslator"
 	"github.com/jaegertracing/jaeger/model"
 	"github.com/jaegertracing/jaeger/pkg/es/config"
 	"github.com/jaegertracing/jaeger/plugin/storage/es"
 	"github.com/jaegertracing/jaeger/plugin/storage/es/spanstore/dbmodel"
+	"github.com/jaegertracing/jaeger/v2/storage/elasticsearch/esmodeltranslator"
 )
 
 const testExporterName = "test"
@@ -140,9 +140,9 @@ type mockWriter struct {
 
 var _ batchSpanWriter = (*mockWriter)(nil)
 
-func (m *mockWriter) writeSpans(ctx context.Context, spansData []esmodeltranslator.ConvertedData) (int, error) {
+func (m *mockWriter) writeSpans(ctx context.Context, spansData []esmodeltranslator.ConvertedData) error {
 	for _, c := range spansData {
 		m.spans = append(m.spans, c.DBSpan)
 	}
-	return 0, nil
+	return nil
 }

@@ -28,9 +28,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	"github.com/jaegertracing/jaeger/v2/storage/elasticsearch/esclient"
 	"github.com/jaegertracing/jaeger/model"
 	"github.com/jaegertracing/jaeger/plugin/storage/es/dependencystore/dbmodel"
+	"github.com/jaegertracing/jaeger/v2/storage/elasticsearch/esclient"
 )
 
 const defaultMaxDocCount = 10_000

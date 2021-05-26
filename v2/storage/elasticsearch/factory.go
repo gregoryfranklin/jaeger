@@ -19,89 +19,47 @@ import (
 	"fmt"
 
 	"go.opentelemetry.io/collector/component"
-	"go.opentelemetry.io/collector/config/configerror"
-	"go.opentelemetry.io/collector/config/configmodels"
+	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
 
-	collector_app "github.com/jaegertracing/jaeger/cmd/collector/app"
 	"github.com/jaegertracing/jaeger/plugin/storage/es"
 )
 
 const (
 	// TypeStr defines type of the Elasticsearch exporter.
-	TypeStr = "jaeger_elasticsearch"
+	typeStr = "jaeger_elasticsearch"
 )
 
-// OptionsFactory returns initialized es.OptionsFactory structure.
-type OptionsFactory func() *es.Options
-
-// DefaultOptions creates Elasticsearch options supported by this exporter.
-func DefaultOptions() *es.Options {
-	return es.NewOptions("es")
+func NewFactory() component.ExporterFactory {
+	return exporterhelper.NewFactory(
+		typeStr,
+		createDefaultConfig,
+		exporterhelper.WithTraces(createTracesExporter))
 }
-
-// Factory is the factory for Jaeger Elasticsearch exporter.
-type Factory struct {
-	OptionsFactory OptionsFactory
-}
-
-// Type gets the type of exporter.
-func (Factory) Type() configmodels.Type {
-	return TypeStr
-}
-
-var _ component.ExporterFactory = (*Factory)(nil)
 
 // CreateDefaultConfig returns default configuration of Factory.
 // This function implements OTEL component.ExporterFactoryBase interface.
-func (f Factory) CreateDefaultConfig() configmodels.Exporter {
-	queueSettings := exporterhelper.DefaultQueueSettings()
-	queueSettings.NumConsumers = collector_app.DefaultNumWorkers
-	queueSettings.QueueSize = collector_app.DefaultQueueSize
-
-	opts := f.OptionsFactory()
+func createDefaultConfig() config.Exporter {
+	opts := es.NewOptions("es")
 	return &Config{
-		ExporterSettings: configmodels.ExporterSettings{
-			TypeVal: TypeStr,
-			NameVal: TypeStr,
-		},
-		TimeoutSettings: exporterhelper.DefaultTimeoutSettings(),
-		RetrySettings:   exporterhelper.DefaultRetrySettings(),
-		QueueSettings:   queueSettings,
-		Options:         *opts,
+		ExporterSettings: config.NewExporterSettings(config.NewID(typeStr)),
+		TimeoutSettings:  exporterhelper.DefaultTimeoutSettings(),
+		RetrySettings:    exporterhelper.DefaultRetrySettings(),
+		QueueSettings:    exporterhelper.DefaultQueueSettings(),
+		Options:          *opts,
 	}
 }
 
 // CreateTracesExporter creates Jaeger Elasticsearch trace exporter.
 // This function implements OTEL component.ExporterFactory interface.
-func (Factory) CreateTracesExporter(
+func createTracesExporter(
 	ctx context.Context,
 	params component.ExporterCreateParams,
-	cfg configmodels.Exporter,
+	cfg config.Exporter,
 ) (component.TracesExporter, error) {
 	esCfg, ok := cfg.(*Config)
 	if !ok {
-		return nil, fmt.Errorf("could not cast configuration to %s", TypeStr)
+		return nil, fmt.Errorf("could not cast configuration to %s", typeStr)
 	}
 	return newExporter(ctx, esCfg, params)
-}
-
-// CreateMetricsExporter is not implemented.
-// This function implements OTEL component.ExporterFactory interface.
-func (Factory) CreateMetricsExporter(
-	context.Context,
-	component.ExporterCreateParams,
-	configmodels.Exporter,
-) (component.MetricsExporter, error) {
-	return nil, configerror.ErrDataTypeIsNotSupported
-}
-
-// CreateLogsExporter creates a metrics exporter based on provided config.
-// This function implements component.ExporterFactory.
-func (f Factory) CreateLogsExporter(
-	ctx context.Context,
-	params component.ExporterCreateParams,
-	cfg configmodels.Exporter,
-) (component.LogsExporter, error) {
-	return nil, configerror.ErrDataTypeIsNotSupported
 }

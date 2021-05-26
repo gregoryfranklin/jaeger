@@ -29,15 +29,15 @@ import (
 	"go.opentelemetry.io/collector/consumer/pdata"
 	"go.uber.org/zap"
 
-	"github.com/jaegertracing/jaeger/v2/storage/elasticsearch/esmodeltranslator"
-	"github.com/jaegertracing/jaeger/v2/storage/elasticsearch/storagemetrics"
-	"github.com/jaegertracing/jaeger/v2/storage/elasticsearch/esclient"
-	"github.com/jaegertracing/jaeger/v2/storage/elasticsearch/esutil"
 	"github.com/jaegertracing/jaeger/model"
 	"github.com/jaegertracing/jaeger/pkg/cache"
 	"github.com/jaegertracing/jaeger/pkg/es/config"
 	"github.com/jaegertracing/jaeger/pkg/multierror"
 	"github.com/jaegertracing/jaeger/plugin/storage/es/spanstore/dbmodel"
+	"github.com/jaegertracing/jaeger/v2/storage/elasticsearch/esclient"
+	"github.com/jaegertracing/jaeger/v2/storage/elasticsearch/esmodeltranslator"
+	"github.com/jaegertracing/jaeger/v2/storage/elasticsearch/esutil"
+	"github.com/jaegertracing/jaeger/v2/storage/elasticsearch/storagemetrics"
 )
 
 const (
@@ -105,15 +105,15 @@ func (w *esSpanWriter) CreateTemplates(ctx context.Context, spanTemplate, servic
 }
 
 // WriteTraces writes traces to the storage
-func (w *esSpanWriter) WriteTraces(ctx context.Context, traces pdata.Traces) (int, error) {
+func (w *esSpanWriter) WriteTraces(ctx context.Context, traces pdata.Traces) error {
 	spans, err := w.translator.ConvertSpans(traces)
 	if err != nil {
-		return traces.SpanCount(), consumererror.Permanent(err)
+		return consumererror.Permanent(err)
 	}
 	return w.writeSpans(ctx, spans)
 }
 
-func (w *esSpanWriter) writeSpans(ctx context.Context, spansData []esmodeltranslator.ConvertedData) (int, error) {
+func (w *esSpanWriter) writeSpans(ctx context.Context, spansData []esmodeltranslator.ConvertedData) error {
 	buffer := &bytes.Buffer{}
 	// mapping for bulk operation to span
 	var bulkItems []bulkItem
@@ -143,7 +143,7 @@ func (w *esSpanWriter) writeSpans(ctx context.Context, spansData []esmodeltransl
 	res, err := w.client.Bulk(ctx, buffer)
 	if err != nil {
 		errs = append(errs, err)
-		return len(spansData), consumererror.CombineErrors(errs)
+		return consumererror.Combine(errs)
 	}
 	failedOperations, err := w.handleResponse(ctx, res, bulkItems)
 	if err != nil {
@@ -151,9 +151,9 @@ func (w *esSpanWriter) writeSpans(ctx context.Context, spansData []esmodeltransl
 	}
 	dropped += len(failedOperations)
 	if len(failedOperations) > 0 {
-		return dropped, consumererror.PartialTracesError(consumererror.CombineErrors(errs), bulkItemsToTraces(failedOperations))
+		return consumererror.NewTraces(consumererror.Combine(errs), bulkItemsToTraces(failedOperations))
 	}
-	return dropped, consumererror.CombineErrors(errs)
+	return consumererror.Combine(errs)
 }
 
 // handleResponse processes blk response and returns spans that

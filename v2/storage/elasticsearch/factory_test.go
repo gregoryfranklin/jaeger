@@ -21,56 +21,20 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/component"
-	"go.opentelemetry.io/collector/config/configcheck"
-	"go.opentelemetry.io/collector/config/configerror"
-	"go.opentelemetry.io/collector/config/configmodels"
 	"go.uber.org/zap"
-
-	collector_app "github.com/jaegertracing/jaeger/cmd/collector/app"
-	jConfig "github.com/jaegertracing/jaeger/pkg/config"
-	"github.com/jaegertracing/jaeger/plugin/storage/es"
 )
 
 func TestCreateTraceExporter(t *testing.T) {
-	v, _ := jConfig.Viperize(DefaultOptions().AddFlags)
-	opts := DefaultOptions()
-	opts.InitFromViper(v)
-	factory := &Factory{OptionsFactory: func() *es.Options {
-		return opts
-	}}
-	config := factory.CreateDefaultConfig().(*Config)
+	config := createDefaultConfig().(*Config)
 	config.Primary.Servers = []string{"http://foobardoesnotexists.test"}
-	exporter, err := factory.CreateTracesExporter(context.Background(), component.ExporterCreateParams{Logger: zap.NewNop()}, config)
+	exporter, err := createTracesExporter(context.Background(), component.ExporterCreateParams{Logger: zap.NewNop()}, config)
 	require.Nil(t, exporter)
 	require.Error(t, err)
 }
 
 func TestCreateTraceExporter_nilConfig(t *testing.T) {
-	factory := &Factory{}
-	exporter, err := factory.CreateTracesExporter(context.Background(), component.ExporterCreateParams{}, nil)
+	exporter, err := createTracesExporter(context.Background(), component.ExporterCreateParams{}, nil)
 	require.Nil(t, exporter)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "could not cast configuration to jaeger_elasticsearch")
-}
-
-func TestCreateMetricsExporter(t *testing.T) {
-	f := Factory{OptionsFactory: DefaultOptions}
-	mReceiver, err := f.CreateMetricsExporter(context.Background(), component.ExporterCreateParams{}, f.CreateDefaultConfig())
-	assert.Equal(t, err, configerror.ErrDataTypeIsNotSupported)
-	assert.Nil(t, mReceiver)
-}
-
-func TestCreateDefaultConfig(t *testing.T) {
-	factory := Factory{OptionsFactory: DefaultOptions}
-	cfg := factory.CreateDefaultConfig()
-	assert.Equal(t, collector_app.DefaultNumWorkers, cfg.(*Config).NumConsumers)
-	assert.Equal(t, collector_app.DefaultQueueSize, cfg.(*Config).QueueSize)
-
-	assert.NotNil(t, cfg, "failed to create default config")
-	assert.NoError(t, configcheck.ValidateConfig(cfg))
-}
-
-func TestType(t *testing.T) {
-	factory := Factory{OptionsFactory: DefaultOptions}
-	assert.Equal(t, configmodels.Type(TypeStr), factory.Type())
 }

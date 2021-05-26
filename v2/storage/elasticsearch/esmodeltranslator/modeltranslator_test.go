@@ -23,7 +23,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/consumer/pdata"
 	"go.opentelemetry.io/collector/translator/conventions"
-	tracetranslator "go.opentelemetry.io/collector/translator/trace"
 
 	"github.com/jaegertracing/jaeger/plugin/storage/es/spanstore/dbmodel"
 )
@@ -112,12 +111,11 @@ func TestConvertSpan(t *testing.T) {
 	instrumentationLibrary.SetName("io.opentelemetry")
 	instrumentationLibrary.SetVersion("1.0")
 	span := addSpan(traces, "root", traceID, spanID)
-	span.SetKind(pdata.SpanKindCLIENT)
-	span.Status().InitEmpty()
-	span.Status().SetCode(1)
+	span.SetKind(pdata.SpanKindClient)
+	span.Status().SetCode(2)
 	span.Status().SetMessage("messagetext")
-	span.SetStartTime(pdata.TimestampUnixNano(1000000))
-	span.SetEndTime(pdata.TimestampUnixNano(2000000))
+	span.SetStartTimestamp(pdata.TimestampFromTime(time.Unix(0, 1000000)))
+	span.SetEndTimestamp(pdata.TimestampFromTime(time.Unix(0, 2000000)))
 	span.Attributes().Insert("foo", pdata.NewAttributeValueBool(true))
 	span.Attributes().Insert("toTagMap", pdata.NewAttributeValueString("val"))
 	span.Events().Resize(1)
@@ -151,12 +149,12 @@ func TestConvertSpan(t *testing.T) {
 				StartTimeMillis: 1,
 				Tags: []dbmodel.KeyValue{
 					{Key: "span.kind", Type: dbmodel.StringType, Value: "client"},
-					{Key: "status.code", Type: dbmodel.StringType, Value: "STATUS_CODE_OK"},
+					{Key: "status.code", Type: dbmodel.StringType, Value: "STATUS_CODE_ERROR"},
 					{Key: "error", Type: dbmodel.BoolType, Value: "true"},
 					{Key: "status.message", Type: dbmodel.StringType, Value: "messagetext"},
 					{Key: "foo", Type: dbmodel.BoolType, Value: "true"},
-					{Key: tracetranslator.TagInstrumentationName, Type: dbmodel.StringType, Value: "io.opentelemetry"},
-					{Key: tracetranslator.TagInstrumentationVersion, Type: dbmodel.StringType, Value: "1.0"},
+					{Key: conventions.InstrumentationLibraryName, Type: dbmodel.StringType, Value: "io.opentelemetry"},
+					{Key: conventions.InstrumentationLibraryVersion, Type: dbmodel.StringType, Value: "1.0"},
 				},
 				Tag: map[string]interface{}{"toTagMap": "val"},
 				Logs: []dbmodel.Log{{Fields: []dbmodel.KeyValue{
@@ -182,8 +180,8 @@ func BenchmarkConvertSpanID(b *testing.B) {
 func TestSpanEmptyRef(t *testing.T) {
 	traces := traces("myservice")
 	span := addSpan(traces, "root", traceID, spanID)
-	span.SetStartTime(pdata.TimestampUnixNano(1000000))
-	span.SetEndTime(pdata.TimestampUnixNano(2000000))
+	span.SetStartTimestamp(pdata.TimestampFromTime(time.Unix(0, 1000000)))
+	span.SetEndTimestamp(pdata.TimestampFromTime(time.Unix(0, 2000000)))
 
 	c := &Translator{}
 	spansData, err := c.ConvertSpans(traces)
@@ -268,7 +266,7 @@ func addSpan(traces pdata.Traces, name string, traceID pdata.TraceID, spanID pda
 	span.SetName(name)
 	span.SetTraceID(traceID)
 	span.SetSpanID(spanID)
-	span.SetStartTime(pdata.TimestampUnixNano(time.Now().UnixNano()))
-	span.SetEndTime(pdata.TimestampUnixNano(time.Now().UnixNano()))
+	span.SetStartTimestamp(pdata.TimestampFromTime(time.Now()))
+	span.SetEndTimestamp(pdata.TimestampFromTime(time.Now()))
 	return span
 }

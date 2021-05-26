@@ -139,7 +139,7 @@ func (c *Translator) spanWithoutProcess(span pdata.Span) (*dbmodel.Span, error) 
 	if err != nil {
 		return nil, err
 	}
-	startTime := span.StartTime().AsTime()
+	startTime := span.StartTimestamp().AsTime()
 	startTimeMicros := model.TimeAsEpochMicroseconds(startTime)
 	tags, tagMap := c.tags(span)
 	return &dbmodel.Span{
@@ -149,7 +149,7 @@ func (c *Translator) spanWithoutProcess(span pdata.Span) (*dbmodel.Span, error) 
 		OperationName:   span.Name(),
 		StartTime:       startTimeMicros,
 		StartTimeMillis: startTimeMicros / 1000,
-		Duration:        model.DurationAsMicroseconds(span.EndTime().AsTime().Sub(startTime)),
+		Duration:        model.DurationAsMicroseconds(span.EndTimestamp().AsTime().Sub(startTime)),
 		Tags:            tags,
 		Tag:             tagMap,
 		Logs:            logs(span.Events()),
@@ -157,7 +157,7 @@ func (c *Translator) spanWithoutProcess(span pdata.Span) (*dbmodel.Span, error) 
 }
 
 func references(links pdata.SpanLinkSlice, parentSpanID pdata.SpanID, traceID dbmodel.TraceID) ([]dbmodel.Reference, error) {
-parentSpanIDSet := !parentSpanID.IsEmpty()
+	parentSpanIDSet := !parentSpanID.IsEmpty()
 	if !parentSpanIDSet && links.Len() == 0 {
 		return emptyReferenceList, nil
 	}
@@ -209,7 +209,7 @@ parentSpanIDSet := !parentSpanID.IsEmpty()
 }
 
 func convertSpanID(spanID pdata.SpanID) (dbmodel.SpanID, error) {
-	if !spanID.IsEmpty() {
+	if spanID.IsEmpty() {
 		return "", errZeroSpanID
 	}
 	src := spanID.Bytes()
@@ -219,10 +219,10 @@ func convertSpanID(spanID pdata.SpanID) (dbmodel.SpanID, error) {
 }
 
 func convertTraceID(traceID pdata.TraceID) (dbmodel.TraceID, error) {
-	if !traceID.IsEmpty() {
+	if traceID.IsEmpty() {
 		return "", errZeroTraceID
 	}
-high, low := tracetranslator.TraceIDToUInt64Pair(traceID)
+	high, low := tracetranslator.TraceIDToUInt64Pair(traceID)
 	return dbmodel.TraceID(traceIDToString(high, low)), nil
 }
 
@@ -269,18 +269,18 @@ func (c *Translator) tags(span pdata.Span) ([]dbmodel.KeyValue, map[string]inter
 		tagsCount++
 	}
 	status := span.Status()
-		statusCodeTag, statusCodeTagFound = getTagFromStatusCode(status.Code())
+	statusCodeTag, statusCodeTagFound = getTagFromStatusCode(status.Code())
+	tagsCount++
+
+	errorTag, errorTagFound = getErrorTagFromStatusCode(status.Code())
+	if errorTagFound {
 		tagsCount++
+	}
 
-		errorTag, errorTagFound = getErrorTagFromStatusCode(status.Code())
-		if errorTagFound {
-			tagsCount++
-		}
-
-		statusMsgTag, statusMsgTagFound = getTagFromStatusMsg(status.Message())
-		if statusMsgTagFound {
-			tagsCount++
-		}
+	statusMsgTag, statusMsgTagFound = getTagFromStatusMsg(status.Message())
+	if statusMsgTagFound {
+		tagsCount++
+	}
 	if tagsCount == 0 {
 		return emptyTagList, nil
 	}
@@ -328,13 +328,13 @@ func (c *Translator) addToTagMap(key string, val interface{}, tagMap map[string]
 func getTagFromSpanKind(spanKind pdata.SpanKind) (dbmodel.KeyValue, bool) {
 	var tagStr string
 	switch spanKind {
-	case pdata.SpanKindCLIENT:
+	case pdata.SpanKindClient:
 		tagStr = string(tracetranslator.OpenTracingSpanKindClient)
-	case pdata.SpanKindSERVER:
+	case pdata.SpanKindServer:
 		tagStr = string(tracetranslator.OpenTracingSpanKindServer)
-	case pdata.SpanKindPRODUCER:
+	case pdata.SpanKindProducer:
 		tagStr = string(tracetranslator.OpenTracingSpanKindProducer)
-	case pdata.SpanKindCONSUMER:
+	case pdata.SpanKindConsumer:
 		tagStr = string(tracetranslator.OpenTracingSpanKindConsumer)
 	default:
 		return dbmodel.KeyValue{}, false
@@ -347,6 +347,9 @@ func getTagFromSpanKind(spanKind pdata.SpanKind) (dbmodel.KeyValue, bool) {
 }
 
 func getTagFromStatusCode(statusCode pdata.StatusCode) (dbmodel.KeyValue, bool) {
+	if statusCode == pdata.StatusCode(0) {
+		return dbmodel.KeyValue{}, false
+	}
 	return dbmodel.KeyValue{
 		Key:   tracetranslator.TagStatusCode,
 		Value: statusCode.String(),
@@ -356,6 +359,9 @@ func getTagFromStatusCode(statusCode pdata.StatusCode) (dbmodel.KeyValue, bool) 
 
 func getErrorTagFromStatusCode(statusCode pdata.StatusCode) (dbmodel.KeyValue, bool) {
 	if statusCode == pdata.StatusCode(0) {
+		return dbmodel.KeyValue{}, false
+	}
+	if statusCode == pdata.StatusCode(1) {
 		return dbmodel.KeyValue{}, false
 	}
 	return dbmodel.KeyValue{
@@ -389,8 +395,9 @@ func logs(events pdata.SpanEventSlice) []dbmodel.Log {
 			if event.Name() != "" {
 				fields = append(fields, dbmodel.KeyValue{Key: eventNameKey, Value: event.Name(), Type: dbmodel.StringType})
 			}
-			event.Attributes().ForEach(func(k string, v pdata.AttributeValue) {
+			event.Attributes().Range(func(k string, v pdata.AttributeValue) bool {
 				fields = append(fields, attributeToKeyValue(k, v))
+				return true
 			})
 		}
 		logs = append(logs, dbmodel.Log{
@@ -402,15 +409,16 @@ func logs(events pdata.SpanEventSlice) []dbmodel.Log {
 }
 
 func (c *Translator) appendTagsFromAttributes(tags []dbmodel.KeyValue, tagMap map[string]interface{}, attrs pdata.AttributeMap, skipService bool) ([]dbmodel.KeyValue, map[string]interface{}) {
-	attrs.ForEach(func(key string, attr pdata.AttributeValue) {
+	attrs.Range(func(key string, attr pdata.AttributeValue) bool {
 		if skipService && key == conventions.AttributeServiceName {
-			return
+			return true
 		}
 		if c.allTagsAsFields || c.tagKeysAsFields[key] {
 			tagMap = c.addToTagMap(key, attributeValueToInterface(attr), tagMap)
 		} else {
 			tags = append(tags, attributeToKeyValue(key, attr))
 		}
+		return true
 	})
 	return tags, tagMap
 }
@@ -420,20 +428,20 @@ func attributeToKeyValue(key string, attr pdata.AttributeValue) dbmodel.KeyValue
 		Key: key,
 	}
 	switch attr.Type() {
-	case pdata.AttributeValueSTRING:
+	case pdata.AttributeValueTypeString:
 		tag.Type = dbmodel.StringType
 		tag.Value = attr.StringVal()
-	case pdata.AttributeValueBOOL:
+	case pdata.AttributeValueTypeBool:
 		tag.Type = dbmodel.BoolType
 		if attr.BoolVal() {
 			tag.Value = "true"
 		} else {
 			tag.Value = "false"
 		}
-	case pdata.AttributeValueINT:
+	case pdata.AttributeValueTypeInt:
 		tag.Type = dbmodel.Int64Type
 		tag.Value = strconv.FormatInt(attr.IntVal(), 10)
-	case pdata.AttributeValueDOUBLE:
+	case pdata.AttributeValueTypeDouble:
 		tag.Type = dbmodel.Float64Type
 		tag.Value = strconv.FormatFloat(attr.DoubleVal(), 'g', 10, 64)
 	}
@@ -442,13 +450,13 @@ func attributeToKeyValue(key string, attr pdata.AttributeValue) dbmodel.KeyValue
 
 func attributeValueToInterface(attr pdata.AttributeValue) interface{} {
 	switch attr.Type() {
-	case pdata.AttributeValueSTRING:
+	case pdata.AttributeValueTypeString:
 		return attr.StringVal()
-	case pdata.AttributeValueBOOL:
+	case pdata.AttributeValueTypeBool:
 		return attr.BoolVal()
-	case pdata.AttributeValueINT:
+	case pdata.AttributeValueTypeInt:
 		return attr.IntVal()
-	case pdata.AttributeValueDOUBLE:
+	case pdata.AttributeValueTypeDouble:
 		return attr.DoubleVal()
 	}
 	return nil

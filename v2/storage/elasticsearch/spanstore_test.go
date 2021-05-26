@@ -28,13 +28,13 @@ import (
 	"go.opentelemetry.io/collector/consumer/pdata"
 	"go.uber.org/zap"
 
-	"github.com/jaegertracing/jaeger/v2/storage/elasticsearch/esmodeltranslator"
-	"github.com/jaegertracing/jaeger/v2/storage/elasticsearch/storagemetrics"
-	"github.com/jaegertracing/jaeger/v2/storage/elasticsearch/esclient"
-	"github.com/jaegertracing/jaeger/v2/storage/elasticsearch/esutil"
 	"github.com/jaegertracing/jaeger/pkg/cache"
 	"github.com/jaegertracing/jaeger/pkg/es/config"
 	"github.com/jaegertracing/jaeger/plugin/storage/es/spanstore/dbmodel"
+	"github.com/jaegertracing/jaeger/v2/storage/elasticsearch/esclient"
+	"github.com/jaegertracing/jaeger/v2/storage/elasticsearch/esmodeltranslator"
+	"github.com/jaegertracing/jaeger/v2/storage/elasticsearch/esutil"
+	"github.com/jaegertracing/jaeger/v2/storage/elasticsearch/storagemetrics"
 )
 
 func TestMetrics(t *testing.T) {
@@ -151,12 +151,11 @@ func TestWriteSpans(t *testing.T) {
 	}
 
 	t.Run("zero_spans_failed", func(t *testing.T) {
-		dropped, err := w.writeSpans(context.Background(), []esmodeltranslator.ConvertedData{
+		err := w.writeSpans(context.Background(), []esmodeltranslator.ConvertedData{
 			{
 				DBSpan: &dbmodel.Span{},
 			},
 		})
-		assert.Equal(t, 0, dropped)
 		assert.NoError(t, err)
 		esClient.bulkResponse = &esclient.BulkResponse{
 			Items: []esclient.BulkResponseItem{
@@ -185,7 +184,7 @@ func TestWriteSpans(t *testing.T) {
 			isService: false,
 		}})
 
-		dropped, err := w.writeSpans(context.Background(), []esmodeltranslator.ConvertedData{
+		err := w.writeSpans(context.Background(), []esmodeltranslator.ConvertedData{
 			{
 				DBSpan:                 &dbmodel.Span{},
 				Span:                   span,
@@ -193,11 +192,10 @@ func TestWriteSpans(t *testing.T) {
 				InstrumentationLibrary: inst,
 			},
 		})
-		assert.Equal(t, 1, dropped)
 		assert.Error(t, err)
-		partialErr, ok := err.(consumererror.PartialError)
-		require.True(t, ok)
-		assert.Equal(t, traces, partialErr.GetTraces())
+		var target consumererror.Traces
+		assert.True(t, consumererror.AsTraces(err, &target))
+		assert.Equal(t, traces, target.GetTraces())
 	})
 }
 

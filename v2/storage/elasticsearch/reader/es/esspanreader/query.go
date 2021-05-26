@@ -19,10 +19,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jaegertracing/jaeger/v2/storage/elasticsearch/esclient"
 	"github.com/jaegertracing/jaeger/model"
 	"github.com/jaegertracing/jaeger/plugin/storage/es/spanstore/dbmodel"
 	"github.com/jaegertracing/jaeger/storage/spanstore"
+	"github.com/jaegertracing/jaeger/v2/storage/elasticsearch/esclient"
 )
 
 const (
